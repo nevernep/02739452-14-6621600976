@@ -1,29 +1,190 @@
-# Movie Data Integration — Airflow + PostgreSQL + Streamlit
+# Movie Data Integration & Analytics
 
-Educational multi-source movie pipeline (2020–2025): TMDB API, OMDb API, Wikipedia HTML scraping.
+โครงงานบูรณาการข้อมูลภาพยนตร์จากหลายแหล่งด้วย Apache Airflow, PostgreSQL, Docker และ Streamlit
 
-## Start
-1. Copy `.env.example` to `.env`; replace API keys and passwords.
-2. Check Wikipedia robots.txt and applicable website terms before scraping. Update the User-Agent contact in `src/pipeline.py`.
-3. Run `docker compose up airflow-init` (first time), then `docker compose up -d`.
-4. Open Airflow at http://localhost:8080, sign in as `airflow` using `AIRFLOW_ADMIN_PASSWORD`, and trigger `movie_multi_source_pipeline`.
-5. Open dashboard at http://localhost:8501.
+**รายวิชา:** 02739452  
+**ลำดับที่:** 14  
+**รหัสนิสิต:** 6621600976
 
-## Data cleaning and quality rules
-- `movies_gold` contains records with a valid title, a release year from 2020–2025, valid rating/runtime ranges, and TMDB or OMDb support.
-- `movies_quarantine` keeps rejected records with `quarantine_reason`: `invalid`, `duplicate`, or `suspicious`.
-- Duplicate detection applies within the same source for the normalized title/year key; matching records from different sources are merged and retained.
-- The quality gate requires at least 100 unique Gold movies before the snapshot is written.
+**GitHub Repository:**  
+https://github.com/nevernep/02739452-14-6621600976
 
-## Dashboard
-- **Overview**: KPI cards and release-year/source charts.
-- **Movie Explorer**: filters for year, source, genre, and title plus a movie table.
-- **Analytics**: rating and genre analysis.
-- **Pipeline Status**: recent runs, Gold/Quarantine KPIs, and counts of invalid, duplicate, and suspicious records.
+## 1. ภาพรวมโครงงาน
 
-## Important caveats
-- The Wikipedia HTML parser is best-effort and must be tested against the live site.
-- OMDb enrichment depends on TMDB seed results, so OMDb is not fully independent. For strict parallel-source grading, refactor to use independent movie title seeds.
-- Deduplication uses normalized title + year, which may not match alternative titles across sites; improve with IMDb IDs.
-- The pipeline has not been integration-tested against live APIs or Docker in this environment.
-- `.env` is ignored; never commit secrets.
+โครงงานนี้พัฒนาระบบรวบรวม ประมวลผล ทำความสะอาด และวิเคราะห์ข้อมูลภาพยนตร์ที่ออกฉายในช่วงปี ค.ศ. 2020–2025 โดยใช้ Apache Airflow ควบคุมกระบวนการ ETL (Extract, Transform, Load) และจัดเก็บข้อมูลใน PostgreSQL
+
+ข้อมูลที่ผ่านการประมวลผลจะถูกนำไปแสดงผลผ่าน Streamlit Dashboard เพื่อให้ผู้ใช้งานสามารถสำรวจจำนวนภาพยนตร์ คะแนนความนิยม และข้อมูลจากแต่ละแหล่งได้
+
+## 2. แหล่งข้อมูล
+
+ระบบรวบรวมข้อมูลจาก 3 แหล่ง ได้แก่
+
+| แหล่งข้อมูล | วิธีดึงข้อมูล | ข้อมูลที่ได้รับ |
+|---|---|---|
+| TMDB | REST API | ชื่อภาพยนตร์ ปีที่ออกฉาย คะแนน TMDB |
+| OMDb | REST API | IMDb ID คะแนน IMDb ประเภทภาพยนตร์ ระยะเวลา |
+| Wikipedia | Web Scraping | รายชื่อภาพยนตร์อเมริกันในช่วงปี 2020–2025 |
+
+การดึงข้อมูล Wikipedia ใช้ Requests และ BeautifulSoup โดยไม่ใช้ Selenium
+
+## 3. เทคโนโลยีที่ใช้
+
+- **Apache Airflow:** จัดการและควบคุมขั้นตอน ETL
+- **Python:** ดึงข้อมูล ทำความสะอาด และตรวจสอบคุณภาพ
+- **PostgreSQL:** จัดเก็บข้อมูลภาพยนตร์
+- **Streamlit:** พัฒนา Dashboard สำหรับแสดงผล
+- **Docker Compose:** จัดการบริการต่าง ๆ ของระบบ
+- **Requests / BeautifulSoup:** ติดต่อ API และดึงข้อมูลเว็บไซต์
+
+## 4. โครงสร้างโปรเจกต์
+
+```text
+movie-data-integration/
+├── dags/
+│   └── movie_pipeline.py
+├── src/
+│   └── pipeline.py
+├── web/
+│   └── app.py
+├── sql/
+├── docker-compose.yml
+├── requirements.txt
+├── README.md
+├── .env.example
+└── .gitignore
+```
+
+โฟลเดอร์ `dags/` เก็บกระบวนการ Airflow, `src/` เก็บฟังก์ชันประมวลผลข้อมูล, `web/` เก็บ Dashboard และ `sql/` เก็บไฟล์ SQL สำหรับฐานข้อมูล
+
+## 5. ขั้นตอนการทำงานของ Pipeline
+
+ระบบใช้ DAG ชื่อ `movie_multi_source_pipeline` โดยมีขั้นตอนดังนี้
+
+1. **Extract Sources:** ดึงข้อมูล TMDB, OMDb และ Wikipedia ผ่าน TaskGroup
+2. **Combine:** รวมข้อมูลจากทั้ง 3 แหล่ง
+3. **Clean Movies:** ทำความสะอาดและจัดรูปแบบข้อมูล
+4. **Data Quality:** ตรวจสอบคุณภาพก่อนบันทึก
+5. **UPSERT Movies:** เพิ่มหรืออัปเดตข้อมูลลง PostgreSQL
+6. **Quality Failed:** รองรับกรณีข้อมูลไม่ผ่านเกณฑ์คุณภาพ
+
+ระบบใช้แนวทาง UPSERT เพื่อลดการสร้างข้อมูลซ้ำเมื่อรัน Pipeline หลายครั้ง
+
+## 6. การทำความสะอาดข้อมูล
+
+ระบบแบ่งข้อมูลออกเป็นกลุ่มตามสถานะการตรวจสอบ
+
+- **Raw Data:** ข้อมูลต้นฉบับสำหรับเก็บรักษาและตรวจสอบย้อนหลัง
+- **Gold Data:** ข้อมูลที่ผ่านการคัดกรองเบื้องต้นและพร้อมนำไปวิเคราะห์
+- **Quarantine:** ข้อมูลที่ต้องตรวจสอบเพิ่มเติม เช่น รายการจาก Wikipedia ที่อาจไม่ใช่ชื่อภาพยนตร์
+
+การตรวจสอบคุณภาพประกอบด้วยการตรวจชื่อภาพยนตร์ว่าง ปีที่อยู่นอกช่วง 2020–2025 และข้อมูลซ้ำตาม `movie_key`
+
+## 7. วิธีติดตั้งและใช้งาน
+
+### 7.1 สิ่งที่ต้องเตรียม
+
+- Docker Desktop พร้อม Docker Compose
+- Git
+- TMDB API Key
+- OMDb API Key
+
+### 7.2 ดาวน์โหลดโปรเจกต์
+
+```bash
+git clone https://github.com/nevernep/02739452-14-6621600976.git
+cd 02739452-14-6621600976
+```
+
+### 7.3 ตั้งค่าตัวแปรสภาพแวดล้อม
+
+สร้างไฟล์ `.env` จาก `.env.example`
+
+สำหรับ PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+เปิดไฟล์ `.env` และกำหนด TMDB API Key, OMDb API Key และค่าการเชื่อมต่อฐานข้อมูลตามตัวแปรที่ระบุในไฟล์ตัวอย่าง
+
+**ห้ามเผยแพร่ไฟล์ `.env` หรือ API Key จริงบน GitHub**
+
+### 7.4 เริ่มระบบ
+
+```bash
+docker compose up -d --build
+```
+
+ตรวจสอบสถานะ Container:
+
+```bash
+docker compose ps
+```
+
+หากโปรเจกต์มีบริการเริ่มต้นฐานข้อมูลหรือ Airflow แยกต่างหาก ให้ดำเนินการตามการตั้งค่าใน `docker-compose.yml` ก่อนใช้งาน
+
+### 7.5 เปิด Apache Airflow
+
+เข้าเว็บไซต์:
+
+http://localhost:8080
+
+เข้าสู่ระบบด้วยบัญชีที่กำหนดไว้ในการติดตั้ง จากนั้นเปิด DAG `movie_multi_source_pipeline` และกด Trigger เพื่อเริ่มการประมวลผลข้อมูล
+
+### 7.6 เปิด Streamlit Dashboard
+
+เข้าเว็บไซต์:
+
+http://localhost:8501
+
+Dashboard อ่านข้อมูลจาก PostgreSQL เพื่อแสดงผลข้อมูลภาพยนตร์
+
+## 8. ความสามารถของ Dashboard
+
+Dashboard ประกอบด้วย
+
+- Overview แสดงตัวชี้วัดสำคัญ
+- Movie Explorer สำหรับค้นหาและดูข้อมูลภาพยนตร์
+- Analytics แสดงกราฟและการวิเคราะห์
+- Pipeline Status แสดงสถานะการประมวลผล
+- ตัวกรองปีที่ออกฉาย แหล่งข้อมูล และประเภทภาพยนตร์
+
+## 9. ผลการทดสอบ
+
+จากการทดสอบระบบในวันที่ 23 ตุลาคม 2569
+
+- Airflow สามารถประมวลผลข้อมูลจาก 3 แหล่งได้สำเร็จ
+- ขั้นตอน Cleaning และ Data Quality ทำงานสำเร็จ
+- ตาราง Gold ที่ตรวจสอบด้วย SQL มี 604 รายการ
+- ไม่พบชื่อภาพยนตร์ว่าง ปีที่อยู่นอกช่วงที่กำหนด หรือ `movie_key` ซ้ำในชุดที่ตรวจสอบ
+- Dashboard สามารถแสดงข้อมูลจาก PostgreSQL ได้
+
+หมายเหตุ: จำนวนข้อมูลที่ปรากฏบน Dashboard อาจแตกต่างจากจำนวนในตาราง Gold เนื่องจากเงื่อนไขการกรองข้อมูล
+
+## 10. ปัญหาที่พบและแนวทางแก้ไข
+
+**ปัญหาที่ 1: PostgreSQL Permission Denied**
+
+อาการ: Airflow ไม่สามารถบันทึกหรือจัดการตารางบางตารางได้
+
+สาเหตุ: ผู้ใช้ที่ Airflow ใช้เชื่อมต่อ PostgreSQL ไม่มีสิทธิ์ที่จำเป็น หรือไม่ได้เป็นเจ้าของตาราง
+
+แนวทางแก้ไข: ตรวจสอบสิทธิ์และกำหนดสิทธิ์หรือเจ้าของตารางให้เหมาะสมกับการทำงานของ Pipeline
+
+**ปัญหาที่ 2: Wikipedia Scraping มีข้อมูลที่ไม่ใช่ชื่อภาพยนตร์**
+
+อาการ: พบชื่อบริษัทผู้ผลิตหรือผู้จัดจำหน่ายปะปนในข้อมูลภาพยนตร์
+
+สาเหตุ: โครงสร้างตาราง HTML ของ Wikipedia มีหลายรูปแบบ
+
+แนวทางแก้ไข: ปรับการเลือกตารางและคอลัมน์ ทำ Data Cleaning และแยกข้อมูลที่ยังต้องตรวจสอบไว้ใน Quarantine
+
+## 11. ข้อจำกัดของระบบ
+
+ข้อมูลบางรายการอาจไม่มีคะแนนหรือรายละเอียดครบทุกช่อง เนื่องจากแต่ละแหล่งข้อมูลให้รายละเอียดแตกต่างกัน และการดึงข้อมูลจาก Wikipedia อาจได้รับผลกระทบเมื่อโครงสร้างหน้าเว็บไซต์เปลี่ยนแปลง
+
+การตรวจ Data Quality เป็นการตรวจสอบตามกฎที่กำหนด ไม่ใช่การยืนยันความถูกต้องของภาพยนตร์ทุกเรื่องด้วยมนุษย์
+
+## 12. สรุป
+
+โครงงานนี้แสดงการบูรณาการข้อมูลจาก API และ Web Scraping ผ่าน Apache Airflow การทำความสะอาดข้อมูล การตรวจสอบคุณภาพ การจัดเก็บข้อมูลใน PostgreSQL และการแสดงผลด้วย Streamlit Dashboard ภายใต้สภาพแวดล้อม Docker Compose
