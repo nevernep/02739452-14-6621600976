@@ -1,0 +1,68 @@
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.5-python3.11
+  env_file: .env
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    PYTHONPATH: /opt/airflow
+    TMDB_API_KEY: ${TMDB_API_KEY:-}
+    OMDB_API_KEY: ${OMDB_API_KEY:-}
+    APP_DB_DSN: postgresql://movies:${POSTGRES_PASSWORD}@postgres:5432/movies
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./src:/opt/airflow/src
+    - ./requirements.txt:/opt/airflow/requirements.txt:ro
+    - ./logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+  user: "${AIRFLOW_UID:-50000}:0"
+  command: webserver
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/bootstrap.sh:/docker-entrypoint-initdb.d/bootstrap.sh:ro
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 20
+  airflow-init:
+    <<: *airflow-common
+    command: bash -c "pip install --no-cache-dir -r /opt/airflow/requirements.txt && airflow db migrate && (airflow users create --username airflow --password "$$AIRFLOW_ADMIN_PASSWORD" --firstname Admin --lastname User --role Admin --email admin@example.local || true)"
+    environment:
+      <<: *airflow-env
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./logs:/opt/airflow/logs
+  airflow-webserver:
+    <<: *airflow-common
+    command: bash -c "pip install --no-cache-dir -r /opt/airflow/requirements.txt && exec airflow webserver"
+    ports: ["8080:8080"]
+  airflow-scheduler:
+    <<: *airflow-common
+    command: bash -c "pip install --no-cache-dir -r /opt/airflow/requirements.txt && exec airflow scheduler"
+  dashboard:
+    image: python:3.11-slim
+    env_file: .env
+    environment:
+      APP_DB_DSN: postgresql://movies:${POSTGRES_PASSWORD}@postgres:5432/movies
+    volumes:
+      - ./web:/app
+    working_dir: /app
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && streamlit run app.py --server.address=0.0.0.0"
+    ports: ["8501:8501"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+volumes:
+  pgdata:
